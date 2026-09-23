@@ -139,14 +139,14 @@ An interactive correlation heatmap plus spend-vs-revenue and clicks-vs-revenue s
 
 1. **Clone the Repository**
    ```bash
-   git clone https://github.com/<your-username>/<your-repo-name>.git
-   cd <your-repo-name>
+   git clone https://github.com/sarank-21/Multi-Brand_Marketing_Campaign_Performance_Analysis.git
+   cd D:\PROJECTS\Anna_Project_3\Multi-Brand_Marketing_Campaign_Performance_Analysis
    ```
 
 2. **Create a Virtual Environment**
    ```bash
    # Windows
-   python -m venv venv
+   python -m venv mmc
    venv\Scripts\activate
 
    # macOS / Linux
