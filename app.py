@@ -24,7 +24,7 @@ CHANNELS = ["WhatsApp", "YouTube", "Google", "Facebook", "Instagram", "Email"]
 # --------------------------------------------------
 # LOAD DATA & MODELS
 # --------------------------------------------------
-DATA_PATH = "final_df.csv"
+DATA_PATH = r"CSV/final_df.csv"
 CLF_MODEL_PATH = "best_classification_model.pkl"
 CLF_SCALER_PATH = "classification_scaler.pkl"
 REG_MODEL_PATH = "best_Regression_model.pkl"
