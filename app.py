@@ -24,15 +24,14 @@ CHANNELS = ["WhatsApp", "YouTube", "Google", "Facebook", "Instagram", "Email"]
 # --------------------------------------------------
 # LOAD DATA & MODELS
 # --------------------------------------------------
-DATA_PATH = r"D:\PROJECTS\Anna_Project_3\Multi-Brand_Marketing_Campaign_Performance_Analysis\CSV\final_df.csv"
-CLF_MODEL_PATH = r"D:\PROJECTS\Anna_Project_3\Multi-Brand_Marketing_Campaign_Performance_Analysis\best_classification_model.pkl"
-CLF_SCALER_PATH = r"D:\PROJECTS\Anna_Project_3\Multi-Brand_Marketing_Campaign_Performance_Analysis\classification_scaler.pkl"
-REG_MODEL_PATH = r"D:\PROJECTS\Anna_Project_3\Multi-Brand_Marketing_Campaign_Performance_Analysis\best_Regression_model.pkl"
-REG_SCALER_PATH = r"D:\PROJECTS\Anna_Project_3\Multi-Brand_Marketing_Campaign_Performance_Analysis\Regression_scaler.pkl"
-CLF_COLUMNS_PATH = r"D:\PROJECTS\Anna_Project_3\Multi-Brand_Marketing_Campaign_Performance_Analysis\model_columns_class.pkl"
-REG_COLUMNS_PATH = r"D:\PROJECTS\Anna_Project_3\Multi-Brand_Marketing_Campaign_Performance_Analysis\model_columns_regression.pkl"
-LABEL_ENCODERS_PATH = r"D:\PROJECTS\Anna_Project_3\Multi-Brand_Marketing_Campaign_Performance_Analysis\label_encoders.pkl"
-
+DATA_PATH = "final_df.csv"
+CLF_MODEL_PATH = "best_classification_model.pkl"
+CLF_SCALER_PATH = "classification_scaler.pkl"
+REG_MODEL_PATH = "best_Regression_model.pkl"
+REG_SCALER_PATH = "Regression_scaler.pkl"
+CLF_COLUMNS_PATH = "model_columns_class.pkl"
+REG_COLUMNS_PATH = "model_columns_regression.pkl"
+LABEL_ENCODERS_PATH = "label_encoders.pkl"
 LABEL_COLUMNS = ['Campaign_Type', 'Target_Audience', 'Language', 'Customer_Segment']
 
 
