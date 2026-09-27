@@ -367,7 +367,7 @@ elif st.session_state.page == "Prediction":
         # ---- Profit / Loss (classification) ----
         input_scaled_clf = clf_scaler.transform(input_encoded_clf)
         predicted_class = clf_model.predict(input_scaled_clf)[0]
-        predicted_label = "Profit" if predicted_class == 1 else "Loss"
+        predicted_label = "Loss" if predicted_class == 1 else "Profit"
 
         st.divider()
         # ----------------------------------------
