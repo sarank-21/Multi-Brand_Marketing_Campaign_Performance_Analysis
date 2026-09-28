@@ -1,12 +1,11 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.express as px
-import joblib
 import warnings
+from pathlib import Path
+import joblib
+import pandas as pd
+import plotly.express as px
+import streamlit as st
 
 warnings.filterwarnings("ignore")
-
 # --------------------------------------------------
 # PAGE CONFIG
 # --------------------------------------------------
@@ -19,7 +18,31 @@ st.set_page_config(
 if "page" not in st.session_state:
     st.session_state.page = "home"
 
+# Must match the channel names / "Channel_" prefix used in the notebook.
 CHANNELS = ["WhatsApp", "YouTube", "Google", "Facebook", "Instagram", "Email"]
+LABEL_COLUMNS = ["Campaign_Type", "Target_Audience", "Language", "Customer_Segment"]
+
+# Notebook convention: Profit = 0, Loss = 1
+PROFIT_CLASS = 0
+
+# --------------------------------------------------
+# FILE PATHS
+# By default everything is looked up relative to this script:
+#   app.py
+#   CSV/final_df.csv
+#   best_classification_model.pkl, classification_scaler.pkl, ...
+# If your files live elsewhere, change BASE_DIR (e.g. Path(r"D:\PROJECTS\...")).
+# --------------------------------------------------
+# BASE_DIR = Path(__file__).resolve().parent
+
+# DATA_PATH = BASE_DIR / "CSV" / "final_df.csv"
+# CLF_MODEL_PATH = BASE_DIR / "best_classification_model.pkl"
+# CLF_SCALER_PATH = BASE_DIR / "classification_scaler.pkl"
+# CLF_COLUMNS_PATH = BASE_DIR / "model_columns_class.pkl"
+# REG_MODEL_PATH = BASE_DIR / "best_Regression_model.pkl"
+# REG_SCALER_PATH = BASE_DIR / "Regression_scaler.pkl"
+# REG_COLUMNS_PATH = BASE_DIR / "model_columns_regression.pkl"
+# LABEL_ENCODERS_PATH = BASE_DIR / "label_encoders.pkl"
 
 # --------------------------------------------------
 # LOAD DATA & MODELS
@@ -27,20 +50,22 @@ CHANNELS = ["WhatsApp", "YouTube", "Google", "Facebook", "Instagram", "Email"]
 DATA_PATH = r"CSV/final_df.csv"
 CLF_MODEL_PATH = "best_classification_model.pkl"
 CLF_SCALER_PATH = "classification_scaler.pkl"
+CLF_COLUMNS_PATH = "model_columns_class.pkl"
 REG_MODEL_PATH = "best_Regression_model.pkl"
 REG_SCALER_PATH = "Regression_scaler.pkl"
-CLF_COLUMNS_PATH = "model_columns_class.pkl"
 REG_COLUMNS_PATH = "model_columns_regression.pkl"
 LABEL_ENCODERS_PATH = "label_encoders.pkl"
-LABEL_COLUMNS = ['Campaign_Type', 'Target_Audience', 'Language', 'Customer_Segment']
 
 
 @st.cache_data
 def load_data():
     df = pd.read_csv(DATA_PATH)
-    # Drop the leftover pandas index column that shows up if the CSV was
-    # saved without index=False (appears as "Unnamed: 0").
-    df = df.loc[:, ~df.columns.str.match(r"^Unnamed(: 0)?$")]
+    # Same cleaning as the notebook:
+    # 1) drop leftover row-number columns
+    df = df.drop(columns=["Unnamed: 0", "index"], errors="ignore")
+    df = df.loc[:, ~df.columns.str.match(r"^Unnamed")]
+    # 2) drop rows the models could not have been trained on
+    df = df.dropna(subset=["Channel_Used", "Revenue", "ROI_Flag"]).reset_index(drop=True)
     return df
 
 
@@ -56,6 +81,7 @@ def load_models():
     return clf_model, clf_scaler, clf_columns, label_encoders, reg_model, reg_scaler, reg_columns
 
 
+LOAD_ERROR = ""
 try:
     clean_df = load_data()
     (clf_model, clf_scaler, clf_columns, label_encoders,
@@ -64,6 +90,27 @@ try:
 except Exception as e:
     MODELS_READY = False
     LOAD_ERROR = str(e)
+
+
+def options_for(col):
+    """Dropdown options come straight from the trained encoder, so every
+    choice is guaranteed to be transformable (and nothing valid is missing)."""
+    return [str(c) for c in label_encoders[col].classes_]
+
+
+def style_fig(fig, title_x=0.5):
+    """Shared chart look."""
+    fig.update_layout(
+        title_x=title_x,
+        title_font=dict(size=26),
+        height=520,
+        hoverlabel=dict(bgcolor="#5EFABE", font_size=14, font_color="black"),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font_color="#e5e7eb",
+    )
+    return fig
+
 
 # --------------------------------------------------
 # SHARED STYLING
@@ -105,8 +152,9 @@ st.title("🎯 Multi-Brand Marketing Campaign Performance Analysis")
 
 if not MODELS_READY:
     st.error(
-        "Couldn't load data/model files. Update the paths at the top of this "
-        f"script to point to your files.\n\nDetails: {LOAD_ERROR}"
+        "Couldn't load data/model files. Put them next to this script "
+        "(data in a `CSV` folder), or change `BASE_DIR` at the top of the script."
+        f"\n\nDetails: {LOAD_ERROR}"
     )
     st.stop()
 
@@ -125,31 +173,16 @@ if st.session_state.page == "home":
             st.session_state.page = "Analysis"
             st.rerun()
 
-    # Calculate values
     total_campaigns = len(clean_df)
-
-    avg_roi = (
-        clean_df["ROI"].mean()
-        if "ROI" in clean_df.columns
-        else 0
-    )
-
-    total_revenue = (
-        clean_df["Revenue"].sum()
-        if "Revenue" in clean_df.columns
-        else 0
-    )
-
+    avg_roi = clean_df["ROI"].mean() if "ROI" in clean_df.columns else 0
+    total_revenue = clean_df["Revenue"].sum() if "Revenue" in clean_df.columns else 0
     profit_rate = (
         (clean_df["ROI_Flag"].astype(str).str.lower() == "profit").mean() * 100
         if "ROI_Flag" in clean_df.columns
         else 0
     )
-
     target_audience = (
-        clean_df["Target_Audience"].nunique()
-        if "Target_Audience" in clean_df.columns
-        else 0
+        clean_df["Target_Audience"].nunique() if "Target_Audience" in clean_df.columns else 0
     )
 
     profit_accent = "#4ade80" if profit_rate >= 50 else "#f87171"
@@ -224,7 +257,6 @@ line-height: 1.2;
 </div>
 </div>
 """
-
     st.markdown(html, unsafe_allow_html=True)
 
     st.subheader("Dataset Overview")
@@ -235,19 +267,20 @@ line-height: 1.2;
             clean_df,
             names="ROI_Flag",
             title="Profit vs Loss Distribution",
-            color_discrete_sequence=["#4ade80", "#f87171"],
+            color="ROI_Flag",
+            color_discrete_map={"Profit": "#4ade80", "Loss": "#f87171"},
         )
         fig.update_layout(title_x=0.34,title_font=dict(size=30),
-                          width=500,     # increase width
-                          height=550  ,    # increase height
-                              hoverlabel=dict(
-                              bgcolor="#5EFABE",
-                              font_size=14,
-                              font_color="black"),
-                              paper_bgcolor="rgba(0,0,0,0)",
-                              plot_bgcolor="rgba(0,0,0,0)",
-                              font_color="#e5e7eb")
-        st.plotly_chart(fig, use_container_width=True)
+                                  width=500,     # increase width
+                                  height=550  ,    # increase height
+                                      hoverlabel=dict(
+                                      bgcolor="#5EFABE",
+                                      font_size=14,
+                                      font_color="black"),
+                                      paper_bgcolor="rgba(0,0,0,0)",
+                                      plot_bgcolor="rgba(0,0,0,0)",
+                                      font_color="#e5e7eb")
+        st.plotly_chart(style_fig(fig), use_container_width=True)
 
 # --------------------------------------------------
 # PREDICTION PAGE
@@ -265,13 +298,13 @@ elif st.session_state.page == "Prediction":
     with col1:
         Campaign_Type = st.selectbox(
             "Campaign Type",
-            ["Paid Ads", "Influencer", "SEO", "Email", "Social Media"],
+            options_for("Campaign_Type"),
             index=None,
             placeholder="Select campaign type",
         )
         Target_Audience = st.selectbox(
             "Target Audience",
-            ["Premium Shoppers", "Working Women", "Youth", "Tier 2 City Customers", "College Students"],
+            options_for("Target_Audience"),
             index=None,
             placeholder="Select target audience",
         )
@@ -281,25 +314,29 @@ elif st.session_state.page == "Prediction":
         Channel_Used = st.multiselect("Channel Used", CHANNELS)
         Impressions = st.number_input("Impressions", min_value=0.0, value=None, placeholder="Enter impressions")
         Clicks = st.number_input("Clicks", min_value=0.0, value=None, placeholder="Enter clicks")
-        Leads = st.number_input("Leads", min_value=0.0, value=None, placeholder="Enter leads")
+        
     with col2:
+        Leads = st.number_input("Leads", min_value=0.0, value=None, placeholder="Enter leads")
         Conversions = st.number_input("Conversions", min_value=0.0, value=None, placeholder="Enter conversions")
         Acquisition_Cost = st.number_input(
-            "Acquisition Cost", min_value=0.0, value=None, placeholder="Enter acquisition cost"
+            "Acquisition Cost (per conversion)",
+            min_value=0.0,
+            value=None,
+            placeholder="Enter cost per conversion",
+            help="Cost of acquiring ONE conversion, not the total campaign spend.",
         )
         Language = st.selectbox(
-            "Language", ["Hindi", "Bengali", "Tamil", "English"], index=None, placeholder="Select language"
+            "Language", options_for("Language"), index=None, placeholder="Select language"
         )
         Engagement_Score = st.number_input(
             "Engagement Score", min_value=0.0, max_value=50.0, value=None, placeholder="Enter engagement score"
         )
         Customer_Segment = st.selectbox(
             "Customer Segment",
-            ["Youth", "College Students", "Working Women", "Premium Shoppers", "Tier 2 City Customers"],
+            options_for("Customer_Segment"),
             index=None,
             placeholder="Select customer segment",
         )
-        Date = st.date_input("Date", value=None)
 
     if st.button("🔎 Predict"):
 
@@ -316,7 +353,6 @@ elif st.session_state.page == "Prediction":
             "Language": Language,
             "Engagement Score": Engagement_Score,
             "Customer Segment": Customer_Segment,
-            "Date": Date,
         }
 
         missing = [name for name, val in required_fields.items() if val is None]
@@ -327,9 +363,17 @@ elif st.session_state.page == "Prediction":
             st.error("Please fill in the following before predicting: " + ", ".join(missing))
             st.stop()
 
-        # NOTE: ROI is intentionally NOT collected — it's derived from
-        # Revenue, which is what's being predicted, so asking for it here
-        # would be both leakage and impossible for the user to know.
+        # ---- Soft sanity checks (warn only; the training data itself
+        #      contains a few rows where Conversions > Leads) ----
+        if Clicks > Impressions:
+            st.warning("Clicks are higher than Impressions - please double-check the values.")
+        if Leads > Clicks:
+            st.warning("Leads are higher than Clicks - please double-check the values.")
+        if Conversions > Leads:
+            st.warning("Conversions are higher than Leads - please double-check the values.")
+
+        # NOTE: ROI and Date are intentionally NOT collected. ROI is derived
+        # from Revenue (which is being predicted) and Date is not a model feature.
         raw_input = {
             "Campaign_Type": Campaign_Type,
             "Target_Audience": Target_Audience,
@@ -347,34 +391,22 @@ elif st.session_state.page == "Prediction":
             raw_input[f"Channel_{ch}"] = 1 if ch in Channel_Used else 0
 
         input_df = pd.DataFrame([raw_input])
-
-        # ---- Build REGRESSION input ----
-        input_df_reg = input_df.copy()
         for col in LABEL_COLUMNS:
-            input_df_reg[col] = label_encoders[col].transform(input_df_reg[col])
-        input_encoded_reg = input_df_reg.reindex(columns=reg_columns, fill_value=0)
-
-        # ---- Build CLASSIFICATION input ----
-        input_df_clf = input_df.copy()
-        for col in LABEL_COLUMNS:
-            input_df_clf[col] = label_encoders[col].transform(input_df_clf[col])
-        input_encoded_clf = input_df_clf.reindex(columns=clf_columns, fill_value=0)
+            input_df[col] = label_encoders[col].transform(input_df[col])
 
         # ---- Revenue (regression) ----
-        input_scaled_reg = reg_scaler.transform(input_encoded_reg)
-        predicted_revenue = reg_model.predict(input_scaled_reg)[0]
+        input_encoded_reg = input_df.reindex(columns=reg_columns, fill_value=0)
+        predicted_revenue = float(reg_model.predict(reg_scaler.transform(input_encoded_reg))[0])
+        predicted_revenue = max(predicted_revenue, 0.0)  # revenue cannot be negative
 
-        # ---- Profit / Loss (classification) ----
-        input_scaled_clf = clf_scaler.transform(input_encoded_clf)
-        predicted_class = clf_model.predict(input_scaled_clf)[0]
-        predicted_label = "Loss" if predicted_class == 1 else "Profit"
+        # ---- Profit / Loss (classification): Profit = 0, Loss = 1 ----
+        input_encoded_clf = input_df.reindex(columns=clf_columns, fill_value=0)
+        predicted_class = clf_model.predict(clf_scaler.transform(input_encoded_clf))[0]
+        predicted_label = "Profit" if predicted_class == PROFIT_CLASS else "Loss"
 
         st.divider()
-        # ----------------------------------------
-        # PREDICTION RESULT
-        # ----------------------------------------
-        result_accent = "#4ade80" if predicted_label == "Profit" else "#f87171"
 
+        result_accent = "#4ade80" if predicted_label == "Profit" else "#f87171"
         result_bg = (
             "rgba(74, 222, 128, 0.10)"
             if predicted_label == "Profit"
@@ -422,7 +454,6 @@ color: var(--result-accent);
 </style>
 """, unsafe_allow_html=True)
 
-        # Result cards -- flush left, see note at top of file
         result_html = f"""
 <div class="result-container">
 <div class="result-card">
@@ -450,32 +481,24 @@ elif st.session_state.page == "Analysis":
 
     st.subheader("📶 Campaign Performance Analysis")
 
-    def style_fig(fig):
-        fig.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font_color="#e5e7eb",
-        )
-        return fig
-
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["By Campaign Type", "By Channel", "By Segment","Top & Low Performers", "Relationships"]
+        ["By Campaign Type", "By Channel", "By Segment", "Top & Low Performers", "Relationships"]
     )
 
     with tab1:
-        agg = clean_df.groupby("Campaign_Type", as_index=False)["ROI"].mean()
+        agg = (
+            clean_df.groupby("Campaign_Type", as_index=False)["ROI"].mean()
+            .sort_values("ROI", ascending=False)
+        )
         fig1 = px.bar(agg, x="Campaign_Type", y="ROI", color="ROI", title="Average ROI by Campaign Type")
-        fig1.update_layout(title_x=0.3,title_font=dict(size=30),
-                          width=500,     # increase width
-                          height=550  ,    # increase height
-                              hoverlabel=dict(
-                              bgcolor="#5EFABE",
-                              font_size=14,
-                              font_color="black"))
         st.plotly_chart(style_fig(fig1), use_container_width=True)
 
     with tab2:
-        exploded = clean_df.assign(Channel=clean_df["Channel_Used"].astype(str).str.split(", ")).explode("Channel")
+        exploded = (
+            clean_df.assign(Channel=clean_df["Channel_Used"].astype(str).str.split(", "))
+            .explode("Channel")
+        )
+        exploded["Channel"] = exploded["Channel"].str.strip()
         agg2 = exploded.groupby("Channel", as_index=False).agg(
             Revenue=("Revenue", "sum"),
             Avg_ROI=("ROI", "mean"),
@@ -483,34 +506,16 @@ elif st.session_state.page == "Analysis":
         c1, c2 = st.columns(2)
         with c1:
             fig2 = px.bar(agg2, x="Channel", y="Revenue", title="Total Revenue by Channel")
-            fig2.update_layout(title_x=0.3,title_font=dict(size=30),
-                          width=500,     # increase width
-                          height=550  ,    # increase height
-                              hoverlabel=dict(
-                              bgcolor="#5EFABE",
-                              font_size=14,
-                              font_color="black"))
             st.plotly_chart(style_fig(fig2), use_container_width=True)
         with c2:
             fig2b = px.bar(agg2, x="Channel", y="Avg_ROI", color="Avg_ROI", title="Average ROI by Channel")
-            fig2b.update_layout(title_x=0.25,title_font=dict(size=30),
-                          width=550,     # increase width
-                          height=550  ,    # increase height
-                              hoverlabel=dict(
-                              bgcolor="#5EFABE",
-                              font_size=14,
-                              font_color="black"))
             st.plotly_chart(style_fig(fig2b), use_container_width=True)
 
     with tab3:
-        fig3 = px.box(clean_df, x="Customer_Segment", y="Engagement_Score", title="Engagement Score by Customer Segment")
-        fig3.update_layout(title_x=0.3,title_font=dict(size=30),
-                          width=500,     # increase width
-                          height=550  ,    # increase height
-                              hoverlabel=dict(
-                              bgcolor="#5EFABE",
-                              font_size=14,
-                              font_color="black"))
+        fig3 = px.box(
+            clean_df, x="Customer_Segment", y="Engagement_Score",
+            title="Engagement Score by Customer Segment",
+        )
         st.plotly_chart(style_fig(fig3), use_container_width=True)
 
     with tab4:
@@ -518,7 +523,7 @@ elif st.session_state.page == "Analysis":
         top_n = st.slider("How many to show", 5, 20, 10)
 
         display_cols = [c for c in ["Campaign_ID", "Campaign_Type", "Channel_Used", "Brand", "Revenue", "ROI"]
-                         if c in clean_df.columns]
+                        if c in clean_df.columns]
 
         top_campaigns = clean_df.nlargest(top_n, rank_metric)[display_cols]
         low_campaigns = clean_df.nsmallest(top_n, rank_metric)[display_cols]
@@ -538,41 +543,21 @@ elif st.session_state.page == "Analysis":
                 clean_df, x="Acquisition_Cost", y="Revenue", color="ROI",
                 title="Spend vs Revenue (colored by ROI)", opacity=0.6,
             )
-            fig4.update_layout(title_x=0.2,title_font=dict(size=30),
-                          width=500,     # increase width
-                          height=550  ,    # increase height
-                              hoverlabel=dict(
-                              bgcolor="#5EFABE",
-                              font_size=14,
-                              font_color="black"))
             st.plotly_chart(style_fig(fig4), use_container_width=True)
         with c2:
             fig5 = px.scatter(
                 clean_df, x="Clicks", y="Revenue", color="ROI",
                 title="Clicks vs Revenue (colored by ROI)", opacity=0.6,
             )
-            fig5.update_layout(title_x=0.2,title_font=dict(size=30),
-                          width=500,     # increase width
-                          height=550  ,    # increase height
-                              hoverlabel=dict(
-                              bgcolor="#5EFABE",
-                              font_size=14,
-                              font_color="black"))
             st.plotly_chart(style_fig(fig5), use_container_width=True)
 
         numeric_cols = [c for c in
-                        ["Impressions", "Clicks", "Leads", "Conversions", "Acquisition_Cost", "Revenue", "ROI", "Engagement_Score"]
+                        ["Impressions", "Clicks", "Leads", "Conversions", "Acquisition_Cost",
+                         "Revenue", "ROI", "Engagement_Score"]
                         if c in clean_df.columns]
         corr = clean_df[numeric_cols].corr()
         fig6 = px.imshow(
             corr, text_auto=".2f", color_continuous_scale="RdBu_r", zmin=-1, zmax=1,
             title="Correlation: Spend, Clicks, Revenue & ROI",
         )
-        fig6.update_layout(title_x=0.3,title_font=dict(size=30),
-                          width=500,     # increase width
-                          height=550  ,    # increase height
-                              hoverlabel=dict(
-                              bgcolor="#5EFABE",
-                              font_size=14,
-                              font_color="black"))
         st.plotly_chart(style_fig(fig6), use_container_width=True)
