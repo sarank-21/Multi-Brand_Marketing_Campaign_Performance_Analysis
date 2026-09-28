@@ -2,245 +2,330 @@
 
 ## 📌 About the Project
 
-This project analyzes marketing campaign performance across three e-commerce brands — **Nykaa, Purplle, and Tira** — and builds machine learning models to predict campaign outcomes before they run. It combines a full data cleaning and feature-engineering pipeline with a **regression model that forecasts Revenue** and a **classification model that flags a campaign as Profit or Loss**, all wrapped in an interactive Streamlit dashboard. Marketing teams can use it to explore historical performance by channel, campaign type, and customer segment, and to simulate a new campaign's expected revenue and profitability before committing budget to it.
+This project analyzes **153,252 marketing campaigns** from three beauty brands (**Nykaa, Purplle and Tira**) and predicts two things for a new campaign: its **expected Revenue** (regression) and whether it will end in **Profit or Loss** (classification). Raw brand CSVs are cleaned, merged, encoded and used to train multiple ML models, and the best ones are served through an interactive **Streamlit** app with a prediction page and an analysis dashboard. It helps marketing teams judge a campaign plan *before* spending budget, and understand which campaign types, channels and segments perform best.
 
 ---
 
 ## 🛠️ Development Process
 
-1. **Data Collection**
-   - Loaded three separate raw datasets — `nykaa_campaign_data_with_nulls.csv`, `purplle_campaign_data_with_nulls.csv`, `tira_campaign_data_with_nulls.csv` — each containing intentional null values to simulate real-world messy data.
-   - Inspected each brand's dataset independently with `.info()`, `.isnull().mean()`, and `.duplicated().sum()` before touching it.
+### 1️⃣ Data Collection
+- Loaded three separate brand datasets: `nykaa_campaign_data_with_nulls.csv`, `purplle_campaign_data_with_nulls.csv` and `tira_campaign_data_with_nulls.csv`.
+- Each file contains campaign details such as `Campaign_Type`, `Target_Audience`, `Duration`, `Channel_Used`, `Impressions`, `Clicks`, `Leads`, `Conversions`, `Revenue`, `Acquisition_Cost`, `ROI`, `Language`, `Engagement_Score`, `Customer_Segment` and `Date`.
 
-2. **Data Cleaning & Preprocessing**
-   - Handled categorical nulls (`Campaign_Type`, `Target_Audience`, `Language`, `Customer_Segment`) by imputing each brand's own mode (e.g., Nykaa's `Campaign_Type` nulls filled with `"Paid Ads"`, Purplle's with `"Influencer"`, Tira's with `"SEO"`).
-   - Converted `Date` to datetime and back-filled missing dates with `bfill`.
-   - Dropped rows with missing `Campaign_ID` or `Channel_Used`, since these can't be safely imputed.
-   - Filled numeric nulls per-column based on distribution shape: mean-imputed `Duration`, `Impressions`, and `Engagement_Score`; median-imputed `Clicks`, `Leads`, `Conversions`, `Revenue`, and `Acquisition_Cost`.
+### 2️⃣ Data Cleaning & Preprocessing
+- Checked null percentages and duplicates for every brand file.
+- **Categorical nulls** (`Campaign_Type`, `Target_Audience`, `Language`, `Customer_Segment`) were filled with the **mode** of each brand.
+- **Numerical nulls**: `Duration`, `Impressions`, `Engagement_Score` filled with the **mean**; `Clicks`, `Leads`, `Conversions`, `Revenue`, `Acquisition_Cost` filled with the **median** (chosen after inspecting box plots).
+- `Date` converted with `pd.to_datetime` and back-filled; rows with missing `Campaign_ID` or `Channel_Used` were dropped.
 
-3. **Outlier Handling**
-   - Applied the IQR method (`Q1`, `Q3`, `1.5×IQR` bounds) to `Clicks`, `Leads`, `Conversions`, `Revenue`, `Acquisition_Cost`, and `ROI` for every brand.
-   - Used `np.clip()` to cap outliers at the bounds rather than dropping rows, preserving dataset size while controlling extreme values.
+### 3️⃣ Outlier Handling
+- Applied the **IQR method** (Q1 − 1.5×IQR, Q3 + 1.5×IQR) on `Clicks`, `Leads`, `Conversions`, `Revenue`, `Acquisition_Cost` and `ROI`.
+- Outliers were **capped** rather than removed so no campaign rows were lost; box plots were checked before and after.
 
-4. **Feature Engineering**
-   - Engineered `ROI` as `(Revenue / (Acquisition_Cost × Conversions)) − 1` for each brand after outlier treatment on the raw fields.
-   - Derived the target label `ROI_Flag` (`"Profit"` if `ROI >= 0`, else `"Loss"`) to power the classification task.
-   - Merged the three cleaned brand datasets with `pd.concat()` into a single `final_df` and reset the index.
+### 4️⃣ Feature Engineering
+- Recalculated **ROI** as `Revenue / (Acquisition_Cost × Conversions) − 1`, since `Acquisition_Cost` is a *per-conversion* cost.
+- Created the target **`ROI_Flag`**: `Profit` if ROI ≥ 0, otherwise `Loss`.
+- Merged the three brand files into one `final_df.csv` (153,252 rows).
 
-5. **Multi-Label Encoding**
-   - Since a campaign can run on more than one channel at once, `Channel_Used` (a comma-separated string like `"WhatsApp, Google"`) was split and encoded with `MultiLabelBinarizer` into six binary columns — one per channel (`WhatsApp`, `YouTube`, `Google`, `Facebook`, `Instagram`, `Email`) — instead of one-hot encoding a single categorical column.
-   - Encoded `Campaign_Type`, `Target_Audience`, `Language`, and `Customer_Segment` with `LabelEncoder`, saving all four fitted encoders together in `label_encoders.pkl` for reuse at inference time.
+### 5️⃣ Data Transformation
+- **Label encoding** (`LabelEncoder`) for `Campaign_Type`, `Target_Audience`, `Language`, `Customer_Segment`; encoders saved to `label_encoders.pkl` so the app uses identical mappings.
+- **Multi-label encoding** (`MultiLabelBinarizer`) for `Channel_Used` → `Channel_Email`, `Channel_Facebook`, `Channel_Google`, `Channel_Instagram`, `Channel_WhatsApp`, `Channel_YouTube`.
+- **StandardScaler** applied to the 17 model features.
 
-6. **Model Building — Revenue Regression**
-   - Feature set: all engineered columns except `Campaign_ID`, `ROI`, `ROI_Flag`, `Revenue` (the target), `Language`, `Campaign_Type`, and `Date`.
-   - Scaled features with `StandardScaler` and benchmarked six regressors — Linear Regression, KNN, Decision Tree, Random Forest, Gradient Boosting, and XGBoost.
-   - Selected the model with the highest R² score on the held-out test split and persisted it as `best_Regression_model.pkl` alongside `Regression_scaler.pkl` and the training column order (`model_columns_regression.pkl`).
+### 6️⃣ Imbalance Handling
+- Target split is **~78% Profit / ~22% Loss** (119,493 vs 33,759).
+- Used a **stratified** train/test split, `class_weight="balanced"` where supported, and judged models on **F1 of the Loss class** instead of plain accuracy.
 
-7. **Model Building — Profit/Loss Classification**
-   - Feature set: all engineered columns except `Campaign_ID`, `ROI`, `ROI_Flag` (the target), `Language`, `Campaign_Type`, and `Date` — deliberately **keeping Revenue as a feature while excluding ROI itself**, since ROI is derived directly from Revenue and would leak the answer.
-   - Benchmarked nine classifiers with `class_weight="balanced"` where supported — Logistic Regression, KNN, Decision Tree, Random Forest, SVM, Naive Bayes, Gradient Boosting, AdaBoost, and XGBoost.
-   - Selected the model with the highest F1 score and persisted it as `best_classification_model.pkl` alongside `classification_scaler.pkl` and `model_columns_class.pkl`.
+### 7️⃣ Leakage Prevention
+- `ROI`, `ROI_Flag`, `Revenue` (for classification), `Campaign_ID` and `Date` were excluded from the features, because ROI is derived from Revenue.
+- Both models use the **same 17 features**, verified with an assertion in the notebook.
 
-8. **Dashboard Development**
-   - Built a three-page Streamlit app (`Home`, `Prediction`, `Analysis`) driven by `st.session_state.page`, with `@st.cache_data` for the cleaned dataset and `@st.cache_resource` for the loaded models/scalers/encoders so they load once per session.
+### 8️⃣ Model Building
+- **Regression (Revenue):** Linear Regression, KNN, Decision Tree, Random Forest, Gradient Boosting, XGBoost.
+- **Classification (Profit/Loss):** Logistic Regression, KNN, Decision Tree, Random Forest, Naive Bayes, Gradient Boosting, AdaBoost, XGBoost (SVM optional via `RUN_SVM`).
+- 80/20 split with `random_state=42`.
 
-9. **Visualization & Analysis**
-   - Used Plotly Express throughout for bar, box, scatter, pie, and correlation-heatmap charts, styled with a consistent dark theme (`paper_bgcolor`, `plot_bgcolor`, custom hover labels).
+### 9️⃣ Model Evaluation
+- Regression: R², MAE, MSE, RMSE. Classification: accuracy (train/test gap), precision, recall, F1.
+- **5-fold stratified cross-validation** confirmed stability (mean F1 ≈ 0.784, std ≈ 0.0015).
+- Ran an 8-campaign **sanity check** (see [Sample Test Cases](#-sample-test-cases)).
 
-10. **Prediction System**
-    - Built a live prediction form that validates every required field, applies the same encoders/scalers used in training, and returns both the predicted Revenue and the predicted Profit/Loss outcome side by side.
+### 🔟 Dashboard Development
+- Built a multi-page **Streamlit** app (`Main.py`) with Home, Prediction and Analysis pages using `st.session_state` navigation.
+- Dropdown options come directly from the trained encoders, so every choice is guaranteed to be transformable.
+
+### 1️⃣1️⃣ Visualization & Analysis
+- Plotly charts for ROI by campaign type, revenue/ROI by channel, engagement by segment, spend/clicks vs revenue and a correlation heatmap.
+
+### 1️⃣2️⃣ Performance Optimization
+- `@st.cache_data` for the dataset and `@st.cache_resource` for all models, scalers and encoders, so they load once per session.
 
 ---
 
 ## ✨ Key Features
 
-### 🔎 Live Campaign Prediction
-Enter a hypothetical campaign's details and instantly get a predicted Revenue figure and a Profit/Loss classification, computed from the same pipeline used in training.
+### 💰 Revenue Prediction
+Predicts expected campaign revenue in ₹ using the best regression model (Gradient Boosting).
+
+### ✅ Profit / Loss Prediction
+Classifies a campaign as Profit or Loss using the best classifier (Random Forest).
 
 ### 📊 KPI Dashboard
-The home page surfaces total campaigns, average ROI, total revenue, profit rate, and target-audience count as live metric cards computed from the cleaned dataset.
+Home page cards for Total Campaigns, Avg ROI, Total Revenue, Profit Rate and Target Audiences.
 
-### 📶 Multi-Angle Performance Analysis
-A tabbed analysis view breaks performance down by Campaign Type, Channel, Customer Segment, Top & Bottom performers, and cross-variable relationships.
+### 🥧 Profit vs Loss Distribution
+Pie chart showing the balance of profitable and loss-making campaigns.
 
-### 🗂️ Multi-Brand Data Pipeline
-Three independently-sourced, independently-cleaned brand datasets (Nykaa, Purplle, Tira) are merged into one unified dataset without losing brand-specific null-handling nuances.
+### 📶 Campaign Analysis
+Five analysis tabs: campaign type, channel, segment, top/low performers and relationships.
 
-### 🏷️ Multi-Label Channel Encoding
-Channels are modeled as a true multi-label field via `MultiLabelBinarizer`, correctly reflecting that a single campaign can run across several channels at once.
+### 🧹 Robust Data Cleaning
+Mode/mean/median imputation with IQR outlier capping per brand.
 
-### 🧮 Dual Model Architecture
-One regression model (Revenue) and one classification model (Profit/Loss) run side-by-side from a shared feature pipeline, giving both a number and a verdict for every prediction.
+### 🔀 Multi-Channel Support
+A campaign can use several channels at once, handled through multi-label encoding.
 
-### 🚫 Leakage-Aware Feature Selection
-ROI is deliberately excluded from both models' feature sets — it's used only to derive the classification label — so no model ever sees information it's trying to predict.
+### 🛡️ Input Validation
+Required-field checks plus warnings when Clicks > Impressions, Leads > Clicks or Conversions > Leads.
 
-### ⚡ Cached Data & Models
-`st.cache_data` and `st.cache_resource` keep the dataset and the six persisted model artifacts (`.pkl` files) from being reloaded on every interaction.
+### ⚡ Cached Resources
+Data and models are cached so pages respond quickly.
 
-### 🎨 Custom Dark-Themed UI
-Hand-styled KPI cards, prediction result cards, and buttons (via injected CSS) give the dashboard a consistent, polished look beyond Streamlit's defaults.
-
-### 🔗 Correlation & Relationship Explorer
-An interactive correlation heatmap plus spend-vs-revenue and clicks-vs-revenue scatter plots let users visually probe what actually drives campaign outcomes.
+### 🎨 Custom UI
+Dark-themed KPI cards, styled buttons, colour-coded result cards (green for Profit, red for Loss).
 
 ---
 
-## 🧩 Features (Detailed)
+## 🔍 Features (Detailed)
 
-### Home Page
-- Displays five KPI cards: Total Campaigns, Average ROI, Total Revenue, Profit Rate, and number of unique Target Audiences.
-- Shows a searchable/scrollable preview (`st.dataframe`) of the first 100 rows of the cleaned dataset.
-- Renders a Profit vs Loss donut/pie chart based on the engineered `ROI_Flag` column.
+### 🔎 Prediction Page
+- 11 required inputs plus a multi-select for channels (WhatsApp, YouTube, Google, Facebook, Instagram, Email).
+- Outputs **Predicted Revenue** (clipped at ₹0) and **Predicted Outcome** (Profit ✅ / Loss ❌) in styled cards.
+- Acquisition Cost is entered *per conversion*, matching how the models were trained.
 
-### Prediction Page
-- Two-column input form covering all 12 raw campaign attributes: Campaign Type, Target Audience, Duration, Channel Used (multi-select), Impressions, Clicks, Leads, Conversions, Acquisition Cost, Language, Engagement Score, Customer Segment, and Date.
-- Validates that every field is filled before running a prediction, listing exactly which fields are missing if not.
-- Deliberately does **not** ask the user for ROI, since ROI is derived from Revenue — the very thing being predicted — which would make it both leakage and impossible for a real user to supply.
-- Builds two parallel encoded feature vectors (one reindexed to the regression model's training columns, one to the classification model's), scales each with its own saved scaler, and displays the predicted Revenue and Profit/Loss outcome as two result cards, color-coded green for Profit and red for Loss.
+### 📶 Analysis Page
+- **By Campaign Type** – average ROI bar chart.
+- **By Channel** – total revenue and average ROI per channel (channels exploded from the multi-value column).
+- **By Segment** – engagement score box plot per customer segment.
+- **Top & Low Performers** – rank by Revenue or ROI with a Top-N slider (5–20).
+- **Relationships** – Spend vs Revenue, Clicks vs Revenue scatter plots and a correlation heatmap.
 
-### Analysis Page
-- **By Campaign Type** — bar chart of average ROI per campaign type.
-- **By Channel** — side-by-side bar charts of total revenue and average ROI per channel, after exploding the multi-label `Channel_Used` field.
-- **By Segment** — box plot of Engagement Score distribution across customer segments.
-- **Top & Low Performers** — user-adjustable ranking (by Revenue or ROI) and count (5–20) showing the best- and worst-performing campaigns side by side.
-- **Relationships** — scatter plots of Acquisition Cost vs Revenue and Clicks vs Revenue (both colored by ROI), plus a correlation heatmap across all key numeric fields.
+### 🏠 Home Page
+- Live KPI cards computed from the cleaned dataset, a 100-row dataset preview and the Profit vs Loss pie chart.
 
 ---
 
 ## 🧰 Tech Stack
 
 ### 🖥️ Frontend / UI
-- **Streamlit** — multi-page dashboard framework with session-state-driven navigation
-- **Custom CSS** — injected via `st.markdown(..., unsafe_allow_html=True)` for buttons, KPI cards, and result cards
+- **Streamlit** – web app, session-state page navigation, tabs, widgets
+- **HTML/CSS** – custom KPI and result cards via `st.markdown`
 
 ### 🧠 Machine Learning
-- **scikit-learn** — `LabelEncoder`, `MultiLabelBinarizer`, `StandardScaler`, `train_test_split`, `LinearRegression`, `KNeighborsRegressor`, `DecisionTreeRegressor`, `RandomForestRegressor`, `GradientBoostingRegressor`, `LogisticRegression`, `KNeighborsClassifier`, `DecisionTreeClassifier`, `RandomForestClassifier`, `SVC`, `GaussianNB`, `AdaBoostClassifier`
-- **XGBoost** — `XGBRegressor`, `XGBClassifier`
-- **joblib** — persisting and loading trained models, scalers, encoders, and column orders
+- **scikit-learn** – models, `LabelEncoder`, `MultiLabelBinarizer`, `StandardScaler`, metrics, cross-validation
+- **XGBoost** – gradient-boosted regressor and classifier
 
 ### 📊 Data Processing & Analysis
-- **pandas** — cleaning, merging, grouping, and feature engineering across the three brand datasets
-- **NumPy** — IQR outlier bound calculation and `np.clip()`-based capping
+- **Pandas** – loading, cleaning, merging, group-by analysis
+- **NumPy** – IQR calculations and clipping
 
 ### 📈 Data Visualization
-- **Plotly Express** — bar, box, scatter, pie, and correlation-heatmap charts across both notebooks and the app
+- **Plotly Express** – bar, pie, box, scatter and heatmap charts
 
-### 🚀 Deployment & Optimization
-- **`st.cache_data`** — caches the loaded/cleaned dataset
-- **`st.cache_resource`** — caches loaded models, scalers, and encoders
+### ⚙️ Backend / Core Logic
+- **Joblib** – saving/loading models, scalers, encoders and column lists
+- **pathlib** – file path handling
+- **warnings** – suppress non-critical warnings
 
 ### 🛠️ Development Tools
-- **Jupyter / Google Colab Notebooks** — `Multi_Brand_Marketing_Campaign_Data_Cleaning.ipynb` (cleaning + feature engineering) and `Multi_Brand_Marketing_Campaign_EDA.ipynb` (EDA + encoding + model training)
+- **Jupyter Notebook / Google Colab** – cleaning and modelling
+- **Git & GitHub** – version control
 
 ---
 
 ## ⚙️ Setup & Installation
 
-1. **Clone the Repository**
-   ```bash
-   git clone https://github.com/sarank-21/Multi-Brand_Marketing_Campaign_Performance_Analysis.git
-   cd D:\PROJECTS\Anna_Project_3\Multi-Brand_Marketing_Campaign_Performance_Analysis
-   ```
+### 1️⃣ Clone the Repository
+```bash
+git clone https://github.com/sarank-21/Multi-Brand_Marketing_Campaign_Performance_Analysis.git
+cd Multi-Brand_Marketing_Campaign_Performance_Analysis
+```
 
-2. **Create a Virtual Environment**
-   ```bash
-   # Windows
-   python -m venv mmc
-   venv\Scripts\activate
+### 2️⃣ Create a Virtual Environment
+```bash
+python -m venv venv
 
-   # macOS / Linux
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
+# Windows
+venv\Scripts\activate
 
-3. **Install Dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-   Key libraries: `streamlit`, `pandas`, `numpy`, `plotly`, `scikit-learn`, `xgboost`, `joblib`
+# macOS / Linux
+source venv/bin/activate
+```
 
-4. **Prepare the Dataset & Model Artifacts**
-   - Place the cleaned dataset at `CSV/final_df.csv` (path used in `app.py`).
-   - Ensure the following model artifacts (produced by the EDA notebook) sit alongside `app.py`: `best_classification_model.pkl`, `classification_scaler.pkl`, `best_Regression_model.pkl`, `Regression_scaler.pkl`, `model_columns_class.pkl`, `model_columns_regression.pkl`, `label_encoders.pkl`.
+### 3️⃣ Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+Key libraries: `streamlit`, `pandas`, `numpy`, `plotly`, `scikit-learn`, `xgboost`, `joblib`.
 
-5. **Run the Application**
-   ```bash
-   streamlit run app.py
-   ```
+### 4️⃣ Prepare the Dataset
+Place the cleaned dataset at:
+```
+CSV/final_df.csv
+```
+To rebuild it, run `Multi_Brand_Marketing_Campaign_Data_Cleaning.ipynb` on the three raw brand CSVs.
 
-6. **Optional: Clear Cache**
-   If you update the dataset or retrain a model, clear Streamlit's cache from the app's menu (⋮ → "Clear cache") or restart the app so `@st.cache_data`/`@st.cache_resource` reload the new files.
+### 5️⃣ Train the Models
+Run `Multi_Brand_Marketing_Campaign_Model.ipynb` (*Restart and run all*). It generates the 7 files the app needs, next to `Main.py`:
+```
+best_classification_model.pkl   classification_scaler.pkl   model_columns_class.pkl
+best_Regression_model.pkl       Regression_scaler.pkl       model_columns_regression.pkl
+label_encoders.pkl
+```
+
+### 6️⃣ Run the Application
+```bash
+streamlit run Main.py
+```
+
+### 7️⃣ Optional: Clear Cache
+```bash
+streamlit cache clear
+```
+
+---
+
+## 🧪 Sample Test Cases
+
+Use these real campaigns from the held-out test split to check the app or the notebook. Enter the values on the **Prediction** page.
+
+### ✅ Should predict **Profit**
+
+| Field | P1 | P2 | P3 | P4 |
+|---|---|---|---|---|
+| Campaign Type | SEO | Paid Ads | Paid Ads | Email |
+| Target Audience | Premium Shoppers | Working Women | Youth | Premium Shoppers |
+| Duration | 15 | 14 | 23 | 5 |
+| Channels | Email | YouTube, Facebook | WhatsApp, Google, YouTube | YouTube |
+| Impressions | 90648 | 55820 | 76381 | 67277 |
+| Clicks | 5309 | 5087 | 8599 | 7652 |
+| Leads | 2712 | 2937 | 4847 | 3436 |
+| Conversions | 1769 | 1280 | 1621 | 777 |
+| Acquisition Cost | 168.01 | 66.28 | 170.21 | 176.84 |
+| Language | Hindi | Tamil | English | Hindi |
+| Engagement Score | 10.8 | 16.67 | 19.73 | 18.98 |
+| Customer Segment | College Students | College Students | Working Women | Tier 2 City Customers |
+
+### ❌ Should predict **Loss**
+
+| Field | L1 | L2 | L3 | L4 |
+|---|---|---|---|---|
+| Campaign Type | Social Media | Social Media | Influencer | Social Media |
+| Target Audience | Youth | Working Women | Premium Shoppers | College Students |
+| Duration | 30 | 8 | 30 | 25 |
+| Channels | Google, YouTube | Instagram | Instagram | YouTube, Email |
+| Impressions | 42242 | 15390 | 11518 | 15328 |
+| Clicks | 1050 | 633 | 828 | 1661 |
+| Leads | 217 | 352 | 224 | 623 |
+| Conversions | 70 | 264 | 775 | 231 |
+| Acquisition Cost | 850.34 | 862.96 | 862.96 | 862.96 |
+| Language | Hindi | Hindi | Bengali | Hindi |
+| Engagement Score | 3.17 | 8.12 | 10.19 | 16.41 |
+| Customer Segment | Working Women | Premium Shoppers | Working Women | Premium Shoppers |
+
+---
+
+## 📊 Model Performance
+
+| Task | Best Model | Key Metrics |
+|---|---|---|
+| Revenue (Regression) | Gradient Boosting | R² 0.7447 · MAE ₹134,492 · RMSE ₹183,315 |
+| Profit / Loss (Classification) | Random Forest | Accuracy 0.9035 · Recall (Loss) 0.8283 · F1 (Loss) 0.7908 |
 
 ---
 
 ## 💼 Use Case
 
-1. **Pre-Launch Budget Planning** — Marketing teams can simulate a planned campaign's inputs before spending money, to see its predicted Revenue and likely Profit/Loss outcome.
-2. **Channel Strategy** — Compare average ROI and total revenue across WhatsApp, YouTube, Google, Facebook, Instagram, and Email to decide where to allocate budget.
-3. **Segment Targeting** — Use the Engagement Score breakdown by Customer Segment to identify which audiences respond best to campaigns.
-4. **Cross-Brand Benchmarking** — Since Nykaa, Purplle, and Tira data are unified, campaign types and channels can be benchmarked across brands rather than in isolation.
-5. **Performance Triage** — Quickly surface the top and bottom N campaigns by Revenue or ROI to investigate what's working and what isn't.
-6. **Spend Sensitivity Analysis** — Explore the Acquisition Cost vs Revenue scatter plot and correlation heatmap to understand diminishing returns on spend.
+1. **Pre-launch Campaign Evaluation** – Check whether a planned campaign is likely to make a profit before committing budget.
+2. **Budget Allocation** – Compare acquisition cost against predicted revenue to decide where spend is worth it.
+3. **Channel Strategy** – See which channels drive the most revenue and ROI, and combine them wisely.
+4. **Audience Targeting** – Understand engagement across customer segments and languages.
+5. **Performance Review** – Identify the top and bottom campaigns by Revenue or ROI.
+6. **Multi-Brand Benchmarking** – Compare Nykaa, Purplle and Tira campaign patterns in one place.
 
 ---
 
 ## 🚀 Future Enhancements
 
-1. Add SHAP or LIME-based explainability so users can see *why* a given campaign was predicted to be Profit or Loss.
-2. Persist prediction history to a database for tracking predicted vs. actual outcomes over time.
-3. Add hyperparameter tuning (GridSearchCV/Optuna) on top of the current model comparison to squeeze out further R²/F1 gains.
-4. Support real-time ad-platform API integration (Google Ads, Meta) to pull live campaign metrics instead of static CSVs.
-5. Add automated PDF/Excel report generation summarizing a batch of predictions.
-6. Introduce user authentication and per-user saved campaign scenarios.
-7. Extend the multi-brand pipeline to onboard new brands without manual per-brand null-value handling.
-8. Add confidence intervals or prediction uncertainty bands to the Revenue forecast.
+1. **Explainability** – Add SHAP/LIME to show why a campaign is predicted as Profit or Loss.
+2. **Hyperparameter Tuning** – GridSearch/Optuna to push regression R² beyond 0.74.
+3. **Funnel Features** – Reintroduce CTR, Lead Rate and Conversion Rate as engineered features.
+4. **Brand as a Feature** – Include the brand in the model for brand-specific predictions.
+5. **Database Integration** – Store predictions and campaign history in MySQL/PostgreSQL.
+6. **Automated Reporting** – Export analysis and predictions as PDF/Excel reports.
+7. **Batch Prediction** – Upload a CSV of planned campaigns and score them all at once.
+8. **Cloud Deployment** – Host on Streamlit Community Cloud or a container platform.
 
 ---
 
-## 🏗️ How It Works
+## 🔄 How It Works
 
 ```
-                    ┌─────────────────────────────┐
-                    │      Streamlit UI Pages      │
-                    │   Home | Prediction | Analysis│
-                    └───────────────┬─────────────┘
-                                    │
-                    ┌───────────────▼─────────────┐
-                    │   st.session_state.page      │
-                    │      (navigation state)      │
-                    └───────────────┬─────────────┘
-                                    │
-                    ┌───────────────▼─────────────┐
-                    │   Application Logic Layer    │
-                    └──┬──────────────┬─────────┬──┘
-                       │              │         │
-           ┌───────────▼───┐  ┌───────▼─────┐ ┌─▼──────────────┐
-           │  Data Pipeline │  │ ML Pipeline │ │  Output Engine  │
-           │  load_data()   │  │load_models()│ │ predicted_revenue│
-           │  (clean CSV)   │  │ (6 .pkl's)  │ │ predicted_label  │
-           └───────┬────────┘  └──────┬──────┘ └─────────┬───────┘
-                    │                  │                  │
-           ┌────────▼──────────────────▼──────────────────▼───────┐
-           │            Cached Resources Layer                    │
-           │   @st.cache_data (final_df) · @st.cache_resource     │
-           │   (clf_model, clf_scaler, reg_model, reg_scaler,     │
-           │    label_encoders, column orders)                    │
-           └──────────────────────────┬────────────────────────────┘
-                                       │
-                          ┌────────────▼────────────┐
-                          │      Analysis Layer      │
-                          │  Plotly Express charts:  │
-                          │  bar · box · scatter ·   │
-                          │  pie · correlation heatmap│
-                          └──────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                    STREAMLIT UI  (Main.py)                    │
+│         🏠 home   →   🔎 Prediction   |   📶 Analysis          │
+└───────────────────────────────┬───────────────────────────────┘
+                                │
+                                ▼
+┌───────────────────────────────────────────────────────────────┐
+│               SESSION STATE  (st.session_state.page)          │
+└───────────────────────────────┬───────────────────────────────┘
+                                │
+                                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                     APPLICATION LOGIC LAYER                   │
+│      options_for()  ·  style_fig()  ·  input validation       │
+└──────────────┬──────────────────┬──────────────────┬──────────┘
+               │                  │                  │
+               ▼                  ▼                  ▼
+┌──────────────────────┐ ┌──────────────────────┐ ┌──────────────────────┐
+│    DATA PIPELINE     │ │     ML PIPELINE      │ │    OUTPUT ENGINE     │
+│ load_data()          │ │ LabelEncoder         │ │ Predicted Revenue ₹  │
+│ drop dead rows       │ │ MultiLabelBinarizer  │ │ Profit / Loss card   │
+│ final_df.csv         │ │ StandardScaler       │ │ KPI cards + charts   │
+│                      │ │ Regressor (GB)       │ │                      │
+│                      │ │ Classifier (RF)      │ │                      │
+└──────────┬───────────┘ └──────────┬───────────┘ └──────────┬───────────┘
+           │                        │                        │
+           └────────────────────────┼────────────────────────┘
+                                    ▼
+┌───────────────────────────────────────────────────────────────┐
+│                     CACHED RESOURCES LAYER                    │
+│   @st.cache_data  → load_data()                               │
+│   @st.cache_resource → load_models()  (.pkl files)            │
+└───────────────────────────────┬───────────────────────────────┘
+                                │
+                                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                       ARTIFACT LAYER                          │
+│  best_Regression_model.pkl · best_classification_model.pkl    │
+│  Regression_scaler.pkl · classification_scaler.pkl            │
+│  model_columns_regression.pkl · model_columns_class.pkl       │
+│  label_encoders.pkl                                           │
+└───────────────────────────────┬───────────────────────────────┘
+                                │
+                                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                        ANALYSIS LAYER                         │
+│  Campaign Type · Channel · Segment · Top/Low · Relationships  │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📖 Project Overview
+## 📘 Project Overview
 
-This project is an end-to-end supervised machine learning system built on multi-brand e-commerce marketing campaign data from Nykaa, Purplle, and Tira. It combines a regression model that forecasts campaign Revenue with a separate classification model that predicts whether a campaign will land in Profit or Loss, using a shared, leakage-aware feature pipeline built on `StandardScaler`-normalized, `LabelEncoder`/`MultiLabelBinarizer`-encoded campaign attributes. The underlying data went through brand-specific null imputation, IQR-based outlier capping, and ROI feature engineering before being merged into a single 150,000+ row dataset. Both models were selected from a bake-off of six regressors and nine classifiers respectively, chosen by R² and F1 score. The resulting artifacts power a three-page Streamlit dashboard that lets users explore historical performance by channel, segment, and campaign type, and run live "what-if" predictions for a hypothetical new campaign. For a marketing team, this turns campaign planning from a purely retrospective reporting exercise into a forward-looking budgeting and channel-selection tool.
+This project is a supervised machine learning system for marketing analytics that studies over 153K campaigns across Nykaa, Purplle and Tira. After per-brand cleaning (mode, mean and median imputation with IQR capping), the data is merged, label-encoded, multi-label encoded for channels and scaled into 17 leakage-free features. A Gradient Boosting regressor estimates campaign revenue (R² ≈ 0.74), while a class-weighted Random Forest classifies each campaign as Profit or Loss (accuracy ≈ 90%, Loss-class F1 ≈ 0.79) on a ~78/22 imbalanced target. The Streamlit app exposes both models through a validated prediction form and adds a dashboard with KPI cards and Plotly analyses of campaign type, channel, segment, top/low performers and correlations. Together they help marketers plan spend, pick channels and avoid loss-making campaigns before launch.
 
 ---
 
