@@ -1,0 +1,13 @@
+streamlit
+pandas
+sqlalchemy
+plotly
+numpy
+matplotlib
+seaborn
+mysql-connector-python
+statsmodels
+nbformat
+scikit-learn
+imbalanced-learn
+xgboost
